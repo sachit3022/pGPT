@@ -383,7 +383,7 @@ int main(int argc, char const *argv[])
 
 
     struct{
-        int batch = 800;
+        int batch = 8000;
         float lr = 0.001;
         int inp_dim = 2;
         int out_dim =1;
@@ -394,7 +394,7 @@ int main(int argc, char const *argv[])
     int out_channels = model_params.out_dim;
     int in_channels = model_params.inp_dim;
     int epocs =100;
-    int num_elements_per_proc = 100;
+    int num_elements_per_proc = 8000;
 
    
     // init data to perform experiments
@@ -474,7 +474,7 @@ int main(int argc, char const *argv[])
 
     if (rank == 0) {       
         auto current_time = std::chrono::high_resolution_clock::now();
-        cout << "Program has been running for " << std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count() << " seconds" << endl;
+        cout << "Program has been running for " << std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count() << "milli seconds" << endl;
         l1.print_weights();
     }
    
