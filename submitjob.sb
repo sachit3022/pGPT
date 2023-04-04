@@ -1,0 +1,23 @@
+#!/bin/bash --login
+########## SBATCH Lines for Resource Request ##########
+
+
+#SBATCH --time=00:10:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=2G
+#SBATCH --job-name Sachit_PP
+
+########## Command Lines for Job Running ##########
+ 
+ 
+########## Command Lines to Run ##########
+
+module load gcc/7.3.0-2.30 openmpi hdf5 python git
+  
+cd /mnt/home/gaudisac/pGPT/        ### change to the directory where your code is located
+ 
+srun -n 1 ./micrograd          ### call your executable
+ 
+scontrol show job $SLURM_JOB_ID     ### write job information to output file
