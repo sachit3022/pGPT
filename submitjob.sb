@@ -2,11 +2,11 @@
 ########## SBATCH Lines for Resource Request ##########
 
 
-#SBATCH --time=00:10:00
+#SBATCH --time=00:20:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=2G
+#SBATCH --cpus-per-task=40
+#SBATCH --mem=20G
 #SBATCH --job-name Sachit_PP
 
 ########## Command Lines for Job Running ##########

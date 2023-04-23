@@ -25,6 +25,10 @@ default_random_engine generator;
 normal_distribution<float> distribution(0,1.0);
 
 
+
+FILE *fp = fopen("pGPT_9.txt","a");
+
+
 class Value{
     
     public:
@@ -220,9 +224,12 @@ void print_matrix(float*  h_A, int row,int col){
 
 
 void matrix_multiplication(float*  h_A,float* h_B,float* h_c,int row,int hid,int col){
+
+    //auto start_time = std::chrono::high_resolution_clock::now();     
+    //omp_set_dynamic(0);
+
+    //#pragma omp parallel for collapse(2)  schedule(dynamic,5) num_threads(14)
     
-    omp_set_dynamic(0);
-    #pragma omp parallel for collapse(2) num_threads(16)
     for(int i=0; i<row; i++){ 
         for(int j=0;j<col; j++){
             for(int k=0;k<hid; k++){
@@ -230,22 +237,54 @@ void matrix_multiplication(float*  h_A,float* h_B,float* h_c,int row,int hid,int
             }
         }
     } 
+    //double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
+    //cout << "matrix mul with treads " <<elapsed <<endl;
+    //fprintf(fp, "matrix_mul :: %10.20lf \n", elapsed);
     return;
 }
+
 
 void matrix_multiplication(vector <Value*> & h_A,vector <Value*> & h_B,vector <Value*> & h_c,int row,int hid,int col){
     
     //cout << "matrix" << row << hid << col <<endl; //omp num treads outside the threads.
-    omp_set_dynamic(0);
-    #pragma omp parallel for collapse(2) num_threads(16)
-    for(int i=0; i<row; i++){ 
+    //h_c reduction with sum
+    int my_rank = 0;
+    int max_rank = 0;
+    auto start_time = std::chrono::high_resolution_clock::now(); 
+
+    //omp_set_dynamic(0);
+    //omp_set_num_threads(577);
+    
+    #pragma omp parallel 
+    {
+
+        my_rank = omp_get_thread_num();
+        max_rank = omp_get_max_threads();
+
+        #pragma omp parallel for schedule(dynamic) collapse(2)
+        for(int i=0; i<row; i++){ 
+            for(int j=0;j<col; j++){
+                for(int k=0;k<hid; k++){
+                    h_c[i*col+j] =  (*h_c[i*col+j]) + *((*h_A[i*hid+k]) *  (*h_B[k*col+j]));
+                }
+            }
+        } 
+    }
+           
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
+    //cout << "matrix mul with treads " <<elapsed << "   " << my_rank << "  "<< max_rank << endl;
+    fprintf(fp, "matrix_mul :: %10.20lf :: %i :: %i  \n", elapsed,my_rank,max_rank);
+
+    return;
+}
+
+void matrix_add(float*  h_A,float* h_B,float* h_c,int row,int col){
+    
+    for(int i=0; i<row; i++){
         for(int j=0;j<col; j++){
-            for(int k=0;k<hid; k++){
-                h_c[i*col+j] =  (*h_c[i*col+j]) + *((*h_A[i*hid+k]) *  (*h_B[k*col+j]));
+                h_c[i*col+j] = h_A[i*col+j]+ h_B[i*col+j];
             }
         }
-    } 
-    return;
 }
 
 void matrix_add(vector <Value*> & h_A,vector <Value*> & h_B,vector <Value*> & h_c, int row, int col){
@@ -285,8 +324,7 @@ void step_array(vector <Value*> &U, int size,float lr,int world_rank){
 
     int  rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        
-    for( int i; i<size;i++){
+    for( int i=0; i<size;i++){
 
         float sub_avg = U[i]->grad;
         float *sub_avgs = NULL;
@@ -325,8 +363,12 @@ void LinearLayer::step(){
     
     int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+    auto start_time = std::chrono::high_resolution_clock::now(); 
     step_array(A,out_channels*in_channels,lr,world_size);
-    //step_array(B,out_channels,lr,size);
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
+    //fprintf(fp, "gradient_update :: %10.20lf :: %i \n", elapsed,world_size);
+    //step_array(B,out_channels,lr,world_size);
 
 }
 
@@ -371,30 +413,32 @@ float *create_rand_nums(int num_elements) {
 
 
 
-int main(int argc, char const *argv[])
+int main(int argc, char** argv)
 {
     MPI_Init(NULL, NULL);
-
     int size, rank;
 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
-
-
+    //tryoput parallel efficiency asymptotic behaviours
+    // Asymtotic limits
+    //MPI ranks and OpenMP limits
     struct{
-        int batch = 8000;
-        float lr = 0.001;
-        int inp_dim = 2;
+        int batch =10000 ;
+        float lr = 0.01;
+        int inp_dim = 5;
         int out_dim =1;
     } model_params ;
 
-
+    //model_params.batch = 10000*size;
+    int training_data = model_params.batch;
+    //weight parallesim
     int batch = model_params.batch;
     int out_channels = model_params.out_dim;
     int in_channels = model_params.inp_dim;
     int epocs =100;
-    int num_elements_per_proc = 8000;
+    int num_elements_per_proc = batch/size;
 
    
     // init data to perform experiments
@@ -427,12 +471,16 @@ int main(int argc, char const *argv[])
     }
     
 
-    
+    auto start_time = std::chrono::high_resolution_clock::now();    
+
     float *x_buffer = (float *)malloc(sizeof(float) * num_elements_per_proc*in_channels);
     float *y_buffer = (float *)malloc(sizeof(float) * num_elements_per_proc);
     
     MPI_Scatter(X, num_elements_per_proc*in_channels, MPI_FLOAT, x_buffer, num_elements_per_proc*in_channels, MPI_FLOAT, 0, MPI_COMM_WORLD);
     MPI_Scatter(y, num_elements_per_proc, MPI_FLOAT, y_buffer, num_elements_per_proc, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
+    //fprintf(fp, "communication_time :: %10.20lf :: %i :: %i :: %i :: %i \n", elapsed,batch,num_elements_per_proc,rank,size);
 
     vector <Value*> value_X;
     vector <Value*> value_y;
@@ -444,41 +492,56 @@ int main(int argc, char const *argv[])
     batch = num_elements_per_proc ;
     model_params.batch = batch;
     
-
-    
-
     //init neural network.
     LinearLayer l1(model_params.batch,model_params.inp_dim,model_params.out_dim);
     l1.init();
 
-    auto start_time = std::chrono::high_resolution_clock::now();    
+    start_time = std::chrono::high_resolution_clock::now();    
     
-    for(int e=0; e<300; e++){
+    for(int e=0; e<epocs; e++){
+
+        auto e_time = std::chrono::high_resolution_clock::now();  
 
         vector <Value*> out;
         init_zeros(out,batch*out_channels);
+        
+        auto f_time = std::chrono::high_resolution_clock::now();
         l1.forward(value_X,out);
+  
+
         //print_matrix(C,model_params.batch,model_params.out_dim);
        
         Value* c = mseloss(out,value_y,batch);
+        double e_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - f_time).count();
+        //fprintf(fp, "forward_time :: %10.20lf :: %i :: %i :: %i \n", e_elapsed,size,num_elements_per_proc,training_data);
+        
+        f_time = std::chrono::high_resolution_clock::now();
         
         c->backward();
+        e_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - f_time).count();
+        //fprintf(fp, "backward_time :: %10.20lf :: %i :: %i :: %i \n", e_elapsed,size,num_elements_per_proc,training_data);
+        
+        f_time = std::chrono::high_resolution_clock::now();
         l1.step();
-        
         c->zero_grad();
-        
 
+        e_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - f_time).count();
+        //fprintf(fp, "step_time :: %10.20lf :: %i :: %i :: %i \n", e_elapsed,size,num_elements_per_proc,training_data);
+
+
+        e_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - e_time).count();
+        //fprintf(fp, "epoch :: %10.20lf :: %i :: %i :: %i \n", e_elapsed,size,num_elements_per_proc,training_data);
         //l1.print_weights();
-        //cout << "Loss for epoc" << e << " is " << c->data << endl;
+        //fprintf(fp, "loss :: %10.20lf :: %i :: %i :: %i :: %i \n", c->data,e,size,num_elements_per_proc,training_data);
     }
 
     if (rank == 0) {       
-        auto current_time = std::chrono::high_resolution_clock::now();
-        cout << "Program has been running for " << std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count() << "milli seconds" << endl;
+        double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
+        //fprintf(fp, "run_time :: %10.20lf :: %i :: %i :: %i \n", elapsed,size,num_elements_per_proc,training_data);
         l1.print_weights();
     }
    
-    
+    fclose(fp);
     MPI_Finalize();
     /*
     vector <Value*> A,X,y,out;
@@ -523,7 +586,7 @@ int main(int argc, char const *argv[])
     cout << A[0]->data << "   "<< A[1]->data <<endl;
     */
 
-
+    
     return 0;
 
 }
